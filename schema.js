@@ -15,7 +15,7 @@ const UserType = new GraphQLObjectType({
   fields: () => ({
     // insert fields here
     id: { type: GraphQLId },
-    name: { type: GraphQLString },
+    firstName: { type: GraphQLString },
     email: { type: GraphQLString },
     phone: { type: GraphQLString },
   }),
@@ -26,7 +26,7 @@ const PostType = new GraphQLObjectType({
   fields: () => ({
     // insert fields here
     id: { type: GraphQLId },
-    name: { type: GraphQLString },
+    title: { type: GraphQLString },
     description: { type: GraphQLString },
     status: { type: GraphQLString },
     // create relationship with user. `creator` is a child of `Post`. Whenever a post is queried, resolver below will run
@@ -55,26 +55,39 @@ const RootQuery = new GraphQLObjectType({
       },
 
       /*
-      on client:
-
-      fetch single user (id not returned unless specified)
+        on client, fetch single user (id not returned unless specified)
+      
         { 
-            user(id: '001') {
-              name
-              email
-            }
+          user(id: '001') {
+            firstName
+            email
+          }
         }
-        // => { data: { user: { name: ____, email: ____ } } }
-      */
+        
+        => { data: { user: { firstName: '', email: '' } } }
+      
+        */
 
       // for fetching all users (should be ordered above...but learning phase!)
       users: {
         type: new GraphQLList(UserType),
-        // no args provided in query
+        // no args provided by query (query params, though?)
         resolve: (parent, args) => {
           return User.find()
         },
       },
+
+      /* on client, fetch all users (notice that no arguments are passed) with just firstName and email:
+        
+       {
+          users {
+            firstName
+            email
+         }
+       }
+        
+        => { data: { users: [ ... ] } }
+      */
 
       post: {
         type: PostType,
@@ -84,15 +97,14 @@ const RootQuery = new GraphQLObjectType({
         },
       },
 
-      /*
-      on client:
+      /* on client, fetching single post with some of the related creator's data:
 
       {
-         project(id: 1) {
-         name
+         post(id: 001) {
+         title
          description,
-         client {
-           name
+         creator {
+           firstName
            email
          }
        }
@@ -110,6 +122,7 @@ const RootQuery = new GraphQLObjectType({
 })
 
 // Mutations
+// in order to make mutation request from client, we need to wrap call in `mutation {}`
 const mutation = new GraphQLObjectType({
   name: 'Mutation',
   fields: {
@@ -118,16 +131,27 @@ const mutation = new GraphQLObjectType({
       type: UserType,
       args: {
         // use `GraphQLNonNull` to ensure client has passed a value for a field (?)
-        name: { type: GraphQLNonNull(GraphQLString) },
+        firstName: { type: GraphQLNonNull(GraphQLString) },
         email: { type: GraphQLNonNull(GraphQLString) },
         phone: { type: GraphQLNonNull(GraphQLString) },
       },
       resolve(parent, args) {
-        const { name, email, phone } = args
+        const { firstName, email, phone } = args
 
-        return new User({ name, email, phone }).save()
+        return new User({ firstName, email, phone }).save()
       },
     },
+
+    /* on client, create a new user, returning id and email:
+
+        mutation {
+          createUser(firstName: 'Alex', email: 'a@t.com', phone: '07516') {
+            id
+            email
+          }
+        }
+    */
+
     // Delete a user
     deleteUser: {
       type: UserType,
@@ -146,16 +170,27 @@ const mutation = new GraphQLObjectType({
         return User.findByIdAndRemove(userId)
       },
     },
+
+    /* on client, delete a user, returning their ID e.g.:
+
+    mutation {
+      deleteUser(id: 001) {
+        id
+      }
+    }
+    
+    */
+
     // Create a post
     createPost: {
       type: PostType,
       args: {
         creatorId: { type: GraphQLNonNull(GraphQLID) },
-        name: { type: GraphQLNonNull(GraphQLString) },
+        title: { type: GraphQLNonNull(GraphQLString) },
         description: { type: GraphQLNonNull(GraphQLString) },
         status: {
           type: new GraphQLEnumType({
-            name: 'PostStatus',
+            name: 'PostStatus', // has to be unique (but why?)
             values: {
               new: { value: 'Not Started' },
               progress: { value: 'In Progress' },
@@ -168,32 +203,36 @@ const mutation = new GraphQLObjectType({
       resolve(parent, args) {
         return new Post({
           creatorId: args.userId,
-          name: args.name,
+          title: args.title,
           description: args.description,
           status: args.status,
         }).save()
       },
     },
-    // Delete a post
-    deletePost: {
-      type: PostType,
-      args: {
-        id: { type: GraphQLNonNull(GraphQLID) },
-      },
-      resolve(parent, args) {
-        return Post.findByIdAndRemove(args.id)
-      },
-    },
+
+    /* on client, create new post, returning its title and description:
+
+    mutation {
+      createPost(title: "Hello", description: "First Post!", status: new, creatorId: "001") {
+      title
+      description
+      }
+    }
+
+    obviously `creatorId` would come via authentication
+    
+    */
+
     // Update a post
     updatePost: {
       type: PostType,
       args: {
         id: { type: GraphQLNonNull(GraphQLID) },
-        name: { type: GraphQLString },
+        title: { type: GraphQLString },
         description: { type: GraphQLString },
         status: {
           type: new GraphQLEnumType({
-            name: 'PostStatusUpdate',
+            name: 'PostStatusUpdate', // has to be unique (but why?)
             values: {
               new: { value: 'Not Started' },
               progress: { value: 'In Progress' },
@@ -207,7 +246,7 @@ const mutation = new GraphQLObjectType({
           args.id,
           {
             $set: {
-              name: args.name,
+              title: args.title,
               description: args.description,
               status: args.status,
             },
@@ -216,27 +255,33 @@ const mutation = new GraphQLObjectType({
         )
       },
     },
+    /* on client, update a post's title and status, returning its title:
+
+    mutation {
+      updatePost(id: '0998fdsfs', title: 'banana', status: "completed") {
+        title
+        status
+      }
+    }
+    
+    */
+
+    // Delete a post
+    deletePost: {
+      type: PostType,
+      args: {
+        id: { type: GraphQLNonNull(GraphQLID) },
+      },
+      resolve(parent, args) {
+        return Post.findByIdAndRemove(args.id)
+      },
+    },
   },
 })
 
 // to be able to use the "RootQuery", we need to export it as part of a schema e.g.:
-const Schema = new GraphQLSchema({
+const schema = new GraphQLSchema({
   query: RootQuery,
 })
 
-export default Schema
-
-/*
-e.g. creating a user:
-
-mutation {
-  createUser(name: 'Alex', email: 'a@t.com', phone: '07516') {
-    id
-    name
-    email
-    phone
-  }
-}
-
-
-*/
+export default schema
